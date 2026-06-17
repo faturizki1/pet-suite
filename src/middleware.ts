@@ -17,7 +17,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Skip public routes
-  if (pathname.startsWith("/(public)") || pathname === "/") {
+  if (pathname === "/" || pathname === "/layanan" || pathname === "/dokter" || pathname === "/booking") {
     return NextResponse.next();
   }
 

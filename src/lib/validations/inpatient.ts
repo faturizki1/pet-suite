@@ -18,5 +18,6 @@ export const CreateInpatientLogSchema = z.object({
   catatan_kondisi: z.string().min(1),
   tindakan_hari_ini: z.string().optional(),
   obat_hari_ini: z.string().optional(),
+  foto_urls: z.array(z.string().url()).max(5).optional(),
   is_visible_customer: z.boolean().default(true),
 });

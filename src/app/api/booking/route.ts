@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { onlineBookings, bookingSlots } from "@/db/schema";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 import { CreateBookingSchema } from "@/lib/validations/booking";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -63,27 +63,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check slot availability
-    const slot = await db.query.bookingSlots.findFirst({
-      where: eq(bookingSlots.id, parsed.data.slot_id),
-    });
-
-    if (!slot || !slot.isAvailable) {
-      return NextResponse.json({ error: "Slot tidak tersedia" }, { status: 409 });
-    }
-
-    if (slot.terisi! >= slot.kuota!) {
-      return NextResponse.json({ error: "Slot sudah penuh" }, { status: 409 });
-    }
-
+    // Atomic transaction — semua dalam SATU db.transaction() dengan row lock
     const result = await db.transaction(async (tx) => {
-      // Increment terisi
-      const newTerisi = slot.terisi! + 1;
+      // Row lock pada slot — cegah overbooking
+      const [locked] = await tx.execute(
+        sql`SELECT id, kuota, terisi, is_available FROM booking_slots WHERE id = ${parsed.data.slot_id}::uuid FOR UPDATE`
+      );
+
+      if (!locked) {
+        throw new Error("SLOT_NOT_FOUND");
+      }
+
+      const slot = locked as {
+        id: string;
+        kuota: number;
+        terisi: number;
+        is_available: boolean;
+      };
+
+      if (!slot.is_available) {
+        throw new Error("SLOT_UNAVAILABLE");
+      }
+
+      if (slot.terisi >= slot.kuota) {
+        throw new Error("SLOT_FULL");
+      }
+
+      // Atomic increment terisi
+      const newTerisi = slot.terisi + 1;
       await tx
         .update(bookingSlots)
         .set({
           terisi: newTerisi,
-          isAvailable: newTerisi < slot.kuota!,
+          isAvailable: newTerisi < slot.kuota,
         })
         .where(eq(bookingSlots.id, slot.id));
 
@@ -108,7 +120,18 @@ export async function POST(request: NextRequest) {
       { data: result, message: "Booking berhasil dikirim" },
       { status: 201 }
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === "SLOT_NOT_FOUND") {
+        return NextResponse.json({ error: "Slot tidak ditemukan" }, { status: 404 });
+      }
+      if (error.message === "SLOT_UNAVAILABLE") {
+        return NextResponse.json({ error: "Slot tidak tersedia" }, { status: 409 });
+      }
+      if (error.message === "SLOT_FULL") {
+        return NextResponse.json({ error: "Slot sudah penuh" }, { status: 409 });
+      }
+    }
     return NextResponse.json({ error: "Terjadi kesalahan server" }, { status: 500 });
   }
 }

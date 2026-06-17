@@ -335,6 +335,15 @@ export const onlineBookings = pgTable("online_bookings", {
 });
 
 // ============================================
+// TABLE: daily_counters (untuk no_transaksi row lock)
+// ============================================
+export const dailyCounters = pgTable("daily_counters", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tanggal: date("tanggal").notNull().unique(),
+  counter: integer("counter").default(0).notNull(),
+});
+
+// ============================================
 // TABLE: clinic_info
 // ============================================
 export const clinicInfo = pgTable("clinic_info", {

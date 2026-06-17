@@ -5,20 +5,12 @@ import {
   transactionItems,
   products,
   stockMutations,
+  dailyCounters,
 } from "@/db/schema";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 import { assertActiveUser } from "@/lib/auth/guard";
 import { CreateTransactionSchema } from "@/lib/validations/pos";
-import { eq, sql } from "drizzle-orm";
-
-function generateNoTransaksi(): string {
-  const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
-  const random = Math.floor(Math.random() * 10000)
-    .toString()
-    .padStart(4, "0");
-  return `INV-${dateStr}-${random}`;
-}
+import { eq, sql, and } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -117,9 +109,11 @@ export async function POST(request: NextRequest) {
     const { items, metode_bayar, diskon_nominal, uang_diterima, catatan, customer_id } =
       parsed.data;
 
-    // Atomic transaction
+    // Atomic transaction — semua dalam SATU db.transaction()
     const result = await db.transaction(async (tx) => {
-      // 1. Validate all products: is_active=true, stok >= qty
+      // ============================================================
+      // FASE 1: Row lock stok + validasi (SEBELUM insert apapun)
+      // ============================================================
       let subtotal = 0;
       const itemSnapshots: Array<{
         tipeItem: string;
@@ -138,24 +132,35 @@ export async function POST(request: NextRequest) {
             throw new Error("VALIDATION: product_id wajib untuk tipe produk");
           }
 
-          const product = await tx.query.products.findFirst({
-            where: eq(products.id, item.product_id),
-          });
+          // Row lock stok SEBELUM validasi apapun
+          const [locked] = await tx.execute(
+            sql`SELECT id, nama, harga_jual, stok, is_active FROM products WHERE id = ${item.product_id}::uuid FOR UPDATE`
+          );
 
-          if (!product || !product.isActive) {
-            throw new Error(
-              `VALIDATION: Produk tidak ditemukan atau tidak aktif`
-            );
+          if (!locked) {
+            throw new Error("VALIDATION: Produk tidak ditemukan");
           }
 
-          if (product.stok! < item.qty) {
+          const product = locked as {
+            id: string;
+            nama: string;
+            harga_jual: string;
+            stok: number;
+            is_active: boolean;
+          };
+
+          if (!product.is_active) {
+            throw new Error("VALIDATION: Produk tidak aktif");
+          }
+
+          if (product.stok < item.qty) {
             throw new Error(
               `STOCK: Stok ${product.nama} tidak mencukupi (tersedia: ${product.stok})`
             );
           }
 
           const itemSubtotal =
-            Number(product.hargaJual) * item.qty - item.diskon;
+            Number(product.harga_jual) * item.qty - item.diskon;
           subtotal += itemSubtotal;
 
           itemSnapshots.push({
@@ -163,7 +168,7 @@ export async function POST(request: NextRequest) {
             productId: item.product_id,
             serviceId: null,
             namaItem: product.nama,
-            hargaSatuan: product.hargaJual,
+            hargaSatuan: product.harga_jual,
             qty: item.qty,
             diskonItem: item.diskon.toString(),
             subtotal: itemSubtotal.toString(),
@@ -181,7 +186,7 @@ export async function POST(request: NextRequest) {
 
           if (!service || !service.isActive) {
             throw new Error(
-              `VALIDATION: Layanan tidak ditemukan atau tidak aktif`
+              "VALIDATION: Layanan tidak ditemukan atau tidak aktif"
             );
           }
 
@@ -202,24 +207,55 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 2. Calculate total
+      // ============================================================
+      // FASE 2: Generate no_transaksi via row lock counter
+      // ============================================================
+      const today = new Date().toISOString().slice(0, 10);
+      const dateStr = today.replace(/-/g, "");
+
+      // Row lock pada daily counter untuk hari ini
+      const [counterRow] = await tx.execute(
+        sql`SELECT id, counter FROM daily_counters WHERE tanggal = ${today}::date FOR UPDATE`
+      );
+
+      let nextCounter: number;
+      let counterId: string;
+
+      if (counterRow) {
+        const row = counterRow as { id: string; counter: number };
+        nextCounter = row.counter + 1;
+        counterId = row.id;
+        await tx
+          .update(dailyCounters)
+          .set({ counter: nextCounter })
+          .where(eq(dailyCounters.id, counterId));
+      } else {
+        nextCounter = 1;
+        const [newRow] = await tx
+          .insert(dailyCounters)
+          .values({ tanggal: today, counter: 1 })
+          .returning();
+        counterId = newRow.id;
+      }
+
+      const noTransaksi = `INV-${dateStr}-${nextCounter.toString().padStart(4, "0")}`;
+
+      // ============================================================
+      // FASE 3: Hitung total + validasi pembayaran
+      // ============================================================
       const total = subtotal - diskon_nominal;
 
-      // 3. If tunai, validate uang_diterima >= total
       let kembalian = 0;
       if (metode_bayar === "tunai") {
         if (!uang_diterima || uang_diterima < total) {
-          throw new Error(
-            "VALIDATION: Uang diterima kurang dari total"
-          );
+          throw new Error("VALIDATION: Uang diterima kurang dari total");
         }
         kembalian = uang_diterima - total;
       }
 
-      // 4. Generate no_transaksi
-      const noTransaksi = generateNoTransaksi();
-
-      // 5. Insert transaction
+      // ============================================================
+      // FASE 4: Insert transaction + items
+      // ============================================================
       const [transaction] = await tx
         .insert(transactions)
         .values({
@@ -237,7 +273,6 @@ export async function POST(request: NextRequest) {
         })
         .returning();
 
-      // 6. Insert transaction_items
       for (const snapshot of itemSnapshots) {
         await tx.insert(transactionItems).values({
           transactionId: transaction.id,
@@ -252,10 +287,11 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // 7. Update stock for each product (with row lock)
+      // ============================================================
+      // FASE 5: Update stok (stok sudah di-row-lock di FASE 1)
+      // ============================================================
       for (const item of items) {
         if (item.tipe_item === "produk" && item.product_id) {
-          // Row lock: SELECT ... FOR UPDATE
           const [locked] = await tx.execute(
             sql`SELECT stok FROM products WHERE id = ${item.product_id}::uuid FOR UPDATE`
           );
@@ -264,9 +300,7 @@ export async function POST(request: NextRequest) {
           const newStok = currentStok - item.qty;
 
           if (newStok < 0) {
-            throw new Error(
-              `STOCK: Stok tidak mencukupi setelah row lock`
-            );
+            throw new Error("STOCK: Stok tidak mencukupi setelah row lock");
           }
 
           await tx
@@ -274,7 +308,6 @@ export async function POST(request: NextRequest) {
             .set({ stok: newStok })
             .where(eq(products.id, item.product_id));
 
-          // Insert stock mutation
           await tx.insert(stockMutations).values({
             productId: item.product_id,
             tipe: "keluar",

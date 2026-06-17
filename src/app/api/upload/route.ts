@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 
+const ALLOWED_FOLDERS = [
+  "pets",
+  "inpatient-logs",
+  "products",
+  "expenses",
+  "profiles",
+  "clinic",
+  "general",
+] as const;
+
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get(SESSION_COOKIE)?.value;
@@ -14,10 +24,18 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
-    const folder = formData.get("folder") as string | null;
+    const folder = (formData.get("folder") as string) || "general";
 
     if (!file) {
       return NextResponse.json({ error: "File wajib diunggah" }, { status: 400 });
+    }
+
+    // Validate folder — whitelist sesuai konvensi ARSITEKTUR.md
+    if (!ALLOWED_FOLDERS.includes(folder as typeof ALLOWED_FOLDERS[number])) {
+      return NextResponse.json(
+        { error: `Folder tidak diizinkan. Gunakan: ${ALLOWED_FOLDERS.join(", ")}` },
+        { status: 400 }
+      );
     }
 
     // Validate file type
@@ -41,8 +59,7 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const ext = file.name.split(".").pop() || "jpg";
     const timestamp = Date.now();
-    const folderPath = folder || "general";
-    const path = `${folderPath}/${timestamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const path = `${folder}/${timestamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
     // Upload to MinIO
     const { uploadFile } = await import("@/lib/storage/client");

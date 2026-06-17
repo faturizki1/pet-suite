@@ -146,6 +146,7 @@ export async function POST(
         catatanKondisi: parsed.data.catatan_kondisi,
         tindakanHariIni: parsed.data.tindakan_hari_ini,
         obatHariIni: parsed.data.obat_hari_ini,
+        fotoUrls: parsed.data.foto_urls || [],
         isVisibleCustomer: parsed.data.is_visible_customer,
       })
       .returning();
