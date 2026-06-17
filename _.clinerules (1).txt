@@ -1,0 +1,132 @@
+# ATURAN WAJIB — VetCare Platform
+
+## SUMBER KEBENARAN
+- `ARSITEKTUR.md` di root project adalah SATU-SATUNYA sumber kebenaran.
+- Dilarang berasumsi, menebak, atau memakai pola dari project lain.
+- Jika ARSITEKTUR.md tidak menjelaskan sesuatu secara eksplisit, STOP dan tanya ke user.
+  Jangan mengisi kekosongan dengan asumsi sendiri.
+- Jika instruksi user bertentangan dengan ARSITEKTUR.md, beri tahu konfliknya
+  dan minta konfirmasi sebelum melanjutkan.
+
+## STACK — TIDAK BOLEH DIGANTI
+- Next.js 14 (App Router) + TypeScript strict + Drizzle ORM + PostgreSQL
+- Auth custom: bcryptjs + jose (JWT httpOnly cookie), TANPA refresh token, TANPA session table
+- Storage: MinIO via @aws-sdk/client-s3
+- TIDAK BOLEH menambah/mengganti library inti (auth, db, storage) tanpa izin eksplisit user.
+- DILARANG menggunakan Supabase, Prisma, NextAuth, atau library auth/ORM lain
+  meskipun "lebih mudah" — ini sudah diputuskan dan final.
+
+## URUTAN PENGEMBANGAN (WAJIB IKUTI, JANGAN LOMPAT)
+1. Setup project: package.json, tsconfig.json, next.config.js, Dockerfile sesuai ARSITEKTUR.md
+2. `src/db/schema.ts` — Drizzle schema, semua tabel sesuai ARSITEKTUR.md persis
+3. `drizzle.config.ts` + jalankan `db:generate` → cek migration hasil sebelum lanjut
+4. `src/lib/auth/` (password.ts, session.ts, guard.ts) — sesuai kode di ARSITEKTUR.md
+5. `src/lib/validations/` — semua schema Zod sesuai ARSITEKTUR.md
+6. `src/middleware.ts` — role routing sesuai ARSITEKTUR.md
+7. API routes satu modul sekali jalan (auth → users → pets → appointments → medical-records →
+   inpatients → pos → inventory → expenses → booking → reports → settings)
+8. UI per role, mulai dari layout shell (sidebar/topbar) baru halaman per modul
+9. Setiap modul backend SELESAI dan teruji dulu sebelum mulai modul berikutnya
+
+## ATURAN KETAT — TIDAK BOLEH DILANGGAR
+- TypeScript strict, dilarang `any` dalam bentuk apapun, dilarang implicit any.
+- Setiap API route WAJIB urutan: verify JWT cookie → cek role → (jika endpoint sensitif,
+  lihat daftar di ARSITEKTUR.md) assertActiveUser() → validasi Zod → try/catch → response typed.
+- Operasi yang menyentuh lebih dari satu tabel WAJIB dibungkus `db.transaction()`. Tidak ada
+  pengecualian, termasuk untuk "sementara" atau "akan diperbaiki nanti".
+- Stok produk tidak boleh negatif. Update stok WAJIB pakai row lock (FOR UPDATE) di dalam transaction.
+- transaction_items: nama_item dan harga_satuan WAJIB snapshot, tidak boleh join real-time ke
+  tabel products/services setelah transaksi lunas.
+- Soft delete untuk: profiles, pets, medical_records, transactions, inpatients, stock_mutations.
+  Hard delete HANYA boleh untuk tabel expenses.
+- Role check WAJIB di middleware DAN di setiap API route — tidak boleh andalkan satu layer saja.
+- Dilarang menyimpan token/role di localStorage. Hanya httpOnly cookie.
+- Dilarang expose JWT_SECRET, MINIO_SECRET_KEY, atau credential apapun ke client/browser.
+- Setiap aksi destruktif di UI wajib confirm dialog (lihat daftar di ARSITEKTUR.md).
+- Upload file wajib validasi tipe (jpg/png/webp) dan ukuran (max 5MB) SEBELUM dikirim ke MinIO.
+
+## TESTING — WAJIB DI BAGIAN KRITIS
+
+Gunakan **Vitest** (tambahkan ke devDependencies: `vitest`, `@vitest/coverage-v8`).
+Script di package.json: `"test": "vitest run"`, `"test:watch": "vitest"`.
+
+### WAJIB ada unit test SEBELUM modul dianggap selesai (tidak boleh skip):
+- Generator `no_transaksi` — test race condition: simulasikan beberapa insert paralel,
+  pastikan tidak ada nomor duplikat.
+- Kalkulasi POS — test subtotal per item, diskon item, diskon nominal, total, kembalian,
+  termasuk edge case: diskon lebih besar dari subtotal, qty 0 ditolak, uang_diterima kurang.
+- Update stok dengan row lock — test concurrent: dua "transaksi" mengurangi stok produk yang
+  sama bersamaan, pastikan hasil akhir benar dan tidak ada stok negatif.
+- `stock_mutations` — pastikan setiap perubahan stok (masuk/keluar/adjustment) selalu
+  menghasilkan record mutasi dengan qty_sebelum/qty_sesudah yang konsisten.
+- `verifySessionToken` — test token valid, token expired, token dipalsukan/signature salah,
+  payload corrupt.
+- `assertActiveUser` — test user aktif lolos, user is_active=false ditolak, user tidak ada ditolak.
+- `hashPassword` / `verifyPassword` — test hash berbeda untuk password sama (salt), verify
+  cocok dan tidak cocok.
+- Booking slot counter — test terisi++ saat booking masuk, terisi-- saat ditolak, slot penuh
+  (terisi >= kuota) tidak bisa dibooking lagi.
+- Semua schema Zod kritis (CreateTransactionSchema, CreateBookingSchema, RegisterSchema,
+  LoginSchema) — test input valid lolos, input invalid (field kosong, tipe salah, format
+  salah) ditolak dengan pesan error yang jelas.
+
+### CUKUP type-check + lint, TIDAK PERLU unit test formal:
+- Komponen UI murni tanpa business logic (Badge, Card, Modal, PageHeader, dst)
+- Halaman yang sekadar fetch-and-render tanpa kalkulasi
+- CRUD sederhana tanpa invariant khusus (categories, services, clinic_info)
+- Styling, layout, responsive behavior
+
+### ATURAN TEST
+- Test ditulis berdampingan dengan kode (file `*.test.ts` di folder yang sama atau `__tests__/`).
+- Test database: gunakan instance Postgres test terpisah (bukan production), atau mock
+  Drizzle client untuk unit test murni — pilih yang paling sesuai saat implementasi,
+  tapi tidak boleh test berjalan melawan database production.
+- Jika test gagal, modul TIDAK BOLEH dianggap selesai. Perbaiki dulu sebelum lanjut checkpoint
+  berikutnya atau modul berikutnya.
+- Tampilkan ringkasan hasil test (berapa pass/fail) di setiap checkpoint.
+
+## QUALITY CHECK — DIJALANKAN DI SETIAP CHECKPOINT
+- `npm run lint` — wajib 0 error sebelum lanjut. Warning boleh dicatat tapi tidak blocking.
+- `npm run type-check` — wajib 0 error, tidak ada pengecualian.
+- `npm run test` — wajib semua test pass untuk bagian yang sudah wajib ditest.
+- Jika salah satu di atas gagal di sebuah checkpoint, PERBAIKI dulu sebelum lapor ke user
+  bahwa checkpoint selesai. Jangan melaporkan "selesai" kalau ada yang merah.
+
+## CARA KERJA — MODE IMPLEMENTASI PENUH
+- Boleh mengerjakan banyak file/modul berturut-turut tanpa berhenti, KECUALI di 5 checkpoint
+  wajib di bawah ini. Di luar checkpoint tersebut, jalan terus tanpa minta konfirmasi per file.
+
+### CHECKPOINT WAJIB (berhenti, tampilkan ringkasan, tunggu konfirmasi user)
+1. Setelah `src/db/schema.ts` selesai dan migration berhasil di-generate — SEBELUM mulai
+   menulis kode lain yang bergantung pada schema ini.
+2. Setelah modul auth (`password.ts`, `session.ts`, `guard.ts`, route register/login/logout)
+   selesai, unit test wajib (hashPassword/verifyPassword, verifySessionToken, assertActiveUser)
+   ditulis dan pass — SEBELUM membangun API route lain yang memakainya.
+3. Setelah business logic POS (transaksi atomic, row lock stok, generator no_transaksi)
+   selesai, unit test wajib (no_transaksi race condition, kalkulasi POS, row lock concurrent,
+   stock_mutations) ditulis dan pass — SEBELUM lanjut ke modul inventory/booking/laporan.
+4. Setelah modul booking (slot counter, konfirmasi flow) selesai, unit test wajib (slot counter
+   increment/decrement, slot penuh) ditulis dan pass — SEBELUM lanjut modul berikutnya.
+5. Setelah SEMUA modul backend (API routes) selesai — SEBELUM mulai membangun UI/frontend.
+
+  Di setiap checkpoint: tampilkan ringkasan apa yang dibuat, jalankan lint + type-check + test
+  (lihat QUALITY CHECK), laporkan hasilnya, lalu tunggu instruksi lanjut dari user.
+  Jangan lanjut sendiri, dan jangan lapor "selesai" jika ada lint/type-check/test yang gagal.
+
+- Di luar 4 checkpoint itu, kerjakan modul demi modul mengikuti URUTAN PENGEMBANGAN tanpa
+  berhenti minta izin, tapi tetap taat ke semua ATURAN KETAT di bawah.
+- Jika ragu antara dua pendekatan implementasi yang sama-sah DAN keduanya berdampak ke
+  struktur data atau keamanan, berhenti dan tanya user — jangan pilih sendiri.
+  Untuk keputusan kecil yang tidak berdampak ke data/keamanan (penamaan variabel,
+  urutan import, dsb), putuskan sendiri tanpa bertanya.
+- Jalankan lint + type-check + test (lihat QUALITY CHECK) setiap kali sebuah modul backend
+  selesai, bahkan di luar checkpoint. Jika ada error, perbaiki dulu sebelum lanjut —
+  jangan menumpuk error ke modul berikutnya.
+- Jangan membuat dokumentasi tambahan, README baru, atau file markdown penjelasan kecuali
+  diminta secara eksplisit.
+
+## LARANGAN
+- Dilarang membuat fitur yang tidak ada di ARSITEKTUR.md (no scope creep), misalnya: payment
+  gateway, notifikasi email/SMS, realtime/websocket, multi-tenant, dsb.
+- Dilarang mengubah skema database yang sudah dibuat tanpa konfirmasi eksplisit dari user.
+- Dilarang "memperbaiki" atau menyederhanakan aturan di ARSITEKTUR.md atas inisiatif sendiri.
