@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     const [productList, serviceList] = await Promise.all([
       db.query.products.findMany({
-        where: and(...productConditions),
+        where: and(...productConditions)!,
         with: {
           category: {
             columns: { id: true, nama: true },

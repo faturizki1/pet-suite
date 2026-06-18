@@ -1,25 +1,25 @@
 import { cn } from "@/lib/utils/cn";
 
-interface Column<T> {
+interface Column {
   key: string;
   header: string;
-  render?: (item: T) => React.ReactNode;
+  render?: (item: any) => React.ReactNode;
   className?: string;
 }
 
-interface TableProps<T> {
-  columns: Column<T>[];
-  data: T[];
-  onRowClick?: (item: T) => void;
+interface TableProps {
+  columns: Column[];
+  data: any[];
+  onRowClick?: (item: any) => void;
   className?: string;
 }
 
-export function Table<T extends Record<string, unknown>>({
+export function Table({
   columns,
   data,
   onRowClick,
   className,
-}: TableProps<T>) {
+}: TableProps) {
   return (
     <div className={cn("overflow-x-auto rounded-xl border border-slate-200", className)}>
       <table className="w-full text-sm">
