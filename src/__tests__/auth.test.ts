@@ -1,13 +1,15 @@
+import { vi } from "vitest";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSessionToken, verifySessionToken } from "@/lib/auth/session";
 import { assertActiveUser } from "@/lib/auth/guard";
 
-// Mock database
-jest.mock("@/db/client", () => ({
+// Mock database — vi.mock is hoisted, so use vi.hoisted for the factory
+const mockFindFirst = vi.hoisted(() => vi.fn());
+vi.mock("@/db/client", () => ({
   db: {
     query: {
       profiles: {
-        findFirst: jest.fn(),
+        findFirst: mockFindFirst,
       },
     },
   },
@@ -72,29 +74,27 @@ describe("createSessionToken / verifySessionToken", () => {
 });
 
 describe("assertActiveUser", () => {
-  const { db } = require("@/db/client");
-
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("should return user if active", async () => {
     const mockUser = { id: "user-1", isActive: true, role: "owner" };
-    db.query.profiles.findFirst.mockResolvedValue(mockUser);
+    mockFindFirst.mockResolvedValue(mockUser);
 
     const result = await assertActiveUser("user-1");
     expect(result).toEqual(mockUser);
   });
 
   it("should throw if user not found", async () => {
-    db.query.profiles.findFirst.mockResolvedValue(null);
+    mockFindFirst.mockResolvedValue(null);
 
     await expect(assertActiveUser("nonexistent")).rejects.toThrow("UNAUTHORIZED_INACTIVE");
   });
 
   it("should throw if user is inactive", async () => {
     const mockUser = { id: "user-1", isActive: false, role: "owner" };
-    db.query.profiles.findFirst.mockResolvedValue(mockUser);
+    mockFindFirst.mockResolvedValue(mockUser);
 
     await expect(assertActiveUser("user-1")).rejects.toThrow("UNAUTHORIZED_INACTIVE");
   });

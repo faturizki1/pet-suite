@@ -63,6 +63,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ============================================================
+    // FASE 2: Keamanan — validasi customer_id dari token
+    // ============================================================
+    const token = request.cookies.get(SESSION_COOKIE)?.value;
+    let resolvedCustomerId: string | null = null;
+
+    if (token) {
+      const payload = await verifySessionToken(token);
+      if (payload) {
+        if (payload.role === "customer") {
+          // Customer yang login: customer_id WAJIB dari token, body diabaikan
+          resolvedCustomerId = payload.sub;
+        } else {
+          // Staff/owner: boleh menentukan customer_id dari body
+          resolvedCustomerId = parsed.data.customer_id || null;
+        }
+      }
+    } else {
+      // Tidak ada sesi: hanya guest booking yang diizinkan
+      // Jika body mengirim customer_id, tolak
+      if (parsed.data.customer_id) {
+        return NextResponse.json(
+          { error: "Guest tidak boleh menentukan customer_id" },
+          { status: 403 }
+        );
+      }
+      resolvedCustomerId = null;
+    }
+
     // Atomic transaction — semua dalam SATU db.transaction() dengan row lock
     const result = await db.transaction(async (tx) => {
       // Row lock pada slot — cegah overbooking
@@ -99,12 +128,12 @@ export async function POST(request: NextRequest) {
         })
         .where(eq(bookingSlots.id, slot.id));
 
-      // Create booking
+      // Create booking — customer_id sudah di-resolve dari token
       const [booking] = await tx
         .insert(onlineBookings)
         .values({
           slotId: parsed.data.slot_id,
-          customerId: parsed.data.customer_id || null,
+          customerId: resolvedCustomerId,
           namaGuest: parsed.data.nama_guest || null,
           noHpGuest: parsed.data.no_hp_guest || null,
           namaHewan: parsed.data.nama_hewan,

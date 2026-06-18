@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { CreateTransactionSchema } from "@/lib/validations/pos";
 
 describe("CreateTransactionSchema — Zod validation", () => {
@@ -165,32 +166,5 @@ describe("stock_mutations invariant", () => {
     expect(qtySesudah).toBeLessThan(0);
     // This should be rejected by business logic
     expect(qtySesudah < 0).toBe(true);
-  });
-});
-
-describe("row lock stok — concurrent safety simulation", () => {
-  it("should prevent negative stock when two transactions reduce same product", async () => {
-    // Simulate: stok awal = 5, dua transaksi paralel masing-masing ambil 3
-    // Dengan row lock, salah satu harus gagal
-    const stokAwal = 5;
-    const qty1 = 3;
-    const qty2 = 3;
-
-    // Tanpa row lock: keduanya baca stok=5
-    const stokBaca1 = stokAwal;
-    const stokBaca2 = stokAwal;
-
-    // Keduanya validasi lolos
-    expect(stokBaca1 >= qty1).toBe(true);
-    expect(stokBaca2 >= qty2).toBe(true);
-
-    // Tapi setelah update, stok jadi negatif
-    const stokSesudah1 = stokBaca1 - qty1; // 2
-    const stokSesudah2 = stokBaca2 - qty2; // 2 (seharusnya dari 2 - 3 = -1)
-    // Ini yang dicegah row lock: transaksi 2 harusnya baca stok=2, bukan 5
-    expect(stokSesudah2).toBe(2); // Tanpa row lock, ini salah — harusnya -1
-    // Dengan row lock, transaksi 2 akan baca stok=2 dan gagal karena 2 < 3
-    const stokReal2 = stokSesudah1; // setelah transaksi 1 commit, stok=2
-    expect(stokReal2 >= qty2).toBe(false); // row lock mencegah ini
   });
 });

@@ -124,6 +124,8 @@ export async function POST(request: NextRequest) {
         qty: number;
         diskonItem: string;
         subtotal: string;
+        // Stok saat row lock di FASE 1 — dipakai ulang di FASE 5 agar tidak lock dua kali
+        lockedStok: number | null;
       }> = [];
 
       for (const item of items) {
@@ -172,6 +174,8 @@ export async function POST(request: NextRequest) {
             qty: item.qty,
             diskonItem: item.diskon.toString(),
             subtotal: itemSubtotal.toString(),
+            // Simpan stok hasil row lock FASE 1 untuk dipakai di FASE 5
+            lockedStok: product.stok,
           });
         } else if (item.tipe_item === "layanan") {
           if (!item.service_id) {
@@ -203,6 +207,7 @@ export async function POST(request: NextRequest) {
             qty: item.qty,
             diskonItem: item.diskon.toString(),
             subtotal: itemSubtotal.toString(),
+            lockedStok: null,
           });
         }
       }
@@ -214,7 +219,7 @@ export async function POST(request: NextRequest) {
       const dateStr = today.replace(/-/g, "");
 
       // Row lock pada daily counter untuk hari ini
-      const [counterRow] = await tx.execute(
+      let [counterRow] = await tx.execute(
         sql`SELECT id, counter FROM daily_counters WHERE tanggal = ${today}::date FOR UPDATE`
       );
 
@@ -230,12 +235,48 @@ export async function POST(request: NextRequest) {
           .set({ counter: nextCounter })
           .where(eq(dailyCounters.id, counterId));
       } else {
+        // Race condition: dua request paralel bisa sama-sama masuk cabang ini.
+        // INSERT ... ON CONFLICT DO NOTHING memastikan hanya satu yang berhasil insert.
+        // Yang gagal karena unique constraint akan SELECT FOR UPDATE ulang
+        // untuk mengambil row yang sudah dibuat request lain.
         nextCounter = 1;
-        const [newRow] = await tx
-          .insert(dailyCounters)
-          .values({ tanggal: today, counter: 1 })
-          .returning();
-        counterId = newRow.id;
+        try {
+          const [newRow] = await tx
+            .insert(dailyCounters)
+            .values({ tanggal: today, counter: 1 })
+            .onConflictDoNothing()
+            .returning();
+
+          if (newRow) {
+            // Insert berhasil (kita yang pertama)
+            counterId = newRow.id;
+          } else {
+            // Insert gagal karena row sudah ada dari request lain.
+            // SELECT FOR UPDATE ulang untuk ambil row yang sudah ada.
+            const [existingRow] = await tx.execute(
+              sql`SELECT id, counter FROM daily_counters WHERE tanggal = ${today}::date FOR UPDATE`
+            );
+            const existing = existingRow as { id: string; counter: number };
+            nextCounter = existing.counter + 1;
+            counterId = existing.id;
+            await tx
+              .update(dailyCounters)
+              .set({ counter: nextCounter })
+              .where(eq(dailyCounters.id, counterId));
+          }
+        } catch {
+          // Fallback: jika ada error lain, coba SELECT FOR UPDATE ulang
+          const [existingRow] = await tx.execute(
+            sql`SELECT id, counter FROM daily_counters WHERE tanggal = ${today}::date FOR UPDATE`
+          );
+          const existing = existingRow as { id: string; counter: number };
+          nextCounter = existing.counter + 1;
+          counterId = existing.id;
+          await tx
+            .update(dailyCounters)
+            .set({ counter: nextCounter })
+            .where(eq(dailyCounters.id, counterId));
+        }
       }
 
       const noTransaksi = `INV-${dateStr}-${nextCounter.toString().padStart(4, "0")}`;
@@ -290,14 +331,11 @@ export async function POST(request: NextRequest) {
       // ============================================================
       // FASE 5: Update stok (stok sudah di-row-lock di FASE 1)
       // ============================================================
-      for (const item of items) {
-        if (item.tipe_item === "produk" && item.product_id) {
-          const [locked] = await tx.execute(
-            sql`SELECT stok FROM products WHERE id = ${item.product_id}::uuid FOR UPDATE`
-          );
-
-          const currentStok = Number((locked as { stok: number }).stok);
-          const newStok = currentStok - item.qty;
+      for (const snapshot of itemSnapshots) {
+        if (snapshot.tipeItem === "produk" && snapshot.productId && snapshot.lockedStok !== null) {
+          // Pakai hasil lock dari FASE 1 — tidak perlu row lock lagi
+          const currentStok = snapshot.lockedStok;
+          const newStok = currentStok - snapshot.qty;
 
           if (newStok < 0) {
             throw new Error("STOCK: Stok tidak mencukupi setelah row lock");
@@ -306,13 +344,13 @@ export async function POST(request: NextRequest) {
           await tx
             .update(products)
             .set({ stok: newStok })
-            .where(eq(products.id, item.product_id));
+            .where(eq(products.id, snapshot.productId));
 
           await tx.insert(stockMutations).values({
-            productId: item.product_id,
+            productId: snapshot.productId,
             tipe: "keluar",
             qtySebelum: currentStok,
-            qtyPerubahan: -item.qty,
+            qtyPerubahan: -snapshot.qty,
             qtySesudah: newStok,
             referensi: noTransaksi,
             staffId: payload.sub,
