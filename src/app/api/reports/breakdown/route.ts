@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     }
 
     const items = await db.query.transactionItems.findMany({
-      columns: { tipeItem: true, subtotal: true },
+      columns: { tipeItem: true, subtotal: true, transactionId: true },
     });
 
     const filtered = items.filter((i) => txIds.includes(i.transactionId));

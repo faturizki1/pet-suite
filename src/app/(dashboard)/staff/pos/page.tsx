@@ -5,7 +5,6 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Modal } from "@/components/ui/modal";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { usePos } from "@/hooks/use-pos";
-import { usePrint } from "@/hooks/use-print";
 import { CatalogGrid } from "@/components/modules/pos/catalog-grid";
 import { Cart } from "@/components/modules/pos/cart";
 import { PaymentModalContent } from "@/components/modules/pos/payment-modal";
@@ -13,7 +12,6 @@ import { ReceiptContent } from "@/components/modules/pos/receipt";
 
 export default function StaffPOSPage() {
   const pos = usePos();
-  const { printReceipt } = usePrint();
   const [receiptData, setReceiptData] = useState<{
     noTransaksi: string;
     items: Array<{ nama: string; qty: number; harga: number; subtotal: number }>;
@@ -91,20 +89,6 @@ export default function StaffPOSPage() {
         {receiptData && (
           <ReceiptContent
             data={receiptData}
-            onPrint={(data) => {
-              printReceipt({
-                noTransaksi: data.noTransaksi,
-                tglTransaksi: new Date().toLocaleString("id-ID"),
-                kasir: "Staff",
-                items: data.items,
-                subtotal: data.subtotal,
-                diskon: data.diskon,
-                total: data.total,
-                metodeBayar: data.metodeBayar,
-                uangDiterima: data.uangDiterima,
-                kembalian: data.kembalian,
-              });
-            }}
             onClose={() => setReceiptData(null)}
           />
         )}

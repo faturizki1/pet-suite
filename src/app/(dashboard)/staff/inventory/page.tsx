@@ -8,14 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Table } from "@/components/ui/table";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { formatRupiah, formatDate } from "@/lib/utils/format";
-import { Plus, Search, Package } from "lucide-react";
+import { formatRupiah } from "@/lib/utils/format";
+import { Search } from "lucide-react";
+import { ProductForm } from "@/components/modules/inventory/product-form";
+import { StockMutationForm } from "@/components/modules/inventory/stock-mutation-form";
 
 interface Product {
   id: string;
   kodeProduk: string;
   nama: string;
-  hargaBeli: string;
   hargaJual: string;
   stok: number;
   stokMinimum: number;
@@ -30,9 +31,6 @@ export default function StaffInventoryPage() {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [showStock, setShowStock] = useState<{ id: string; nama: string; stok: number } | null>(null);
-  const [stockQty, setStockQty] = useState(0);
-  const [stockNote, setStockNote] = useState("");
-  const [form, setForm] = useState({ kode_produk: "", nama: "", harga_jual: 0, stok: 0, stok_minimum: 5, satuan: "pcs" });
 
   useEffect(() => {
     fetch("/api/inventory/products")
@@ -45,26 +43,25 @@ export default function StaffInventoryPage() {
     p.nama.toLowerCase().includes(search.toLowerCase())
   );
 
-  async function handleAdd() {
+  async function handleAdd(data: { kode_produk: string; nama: string; harga_jual: number; stok: number; stok_minimum: number; satuan: string }) {
     const res = await fetch("/api/inventory/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify(data),
     });
     if (res.ok) {
       const json = await res.json();
       setProducts((prev) => [json.data, ...prev]);
       setShowAdd(false);
-      setForm({ kode_produk: "", nama: "", harga_jual: 0, stok: 0, stok_minimum: 5, satuan: "pcs" });
     }
   }
 
-  async function handleStockIn() {
-    if (!showStock || stockQty <= 0) return;
+  async function handleStockIn(qty: number, catatan: string) {
+    if (!showStock) return;
     const res = await fetch(`/api/inventory/products/${showStock.id}/stock`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tipe: "masuk", qty: stockQty, catatan: stockNote }),
+      body: JSON.stringify({ tipe: "masuk", qty, catatan }),
     });
     if (res.ok) {
       const json = await res.json();
@@ -74,8 +71,6 @@ export default function StaffInventoryPage() {
         )
       );
       setShowStock(null);
-      setStockQty(0);
-      setStockNote("");
     }
   }
 
@@ -98,7 +93,7 @@ export default function StaffInventoryPage() {
         />
       </div>
 
-      <Table
+      <Table<Product>
         columns={[
           { key: "kodeProduk", header: "Kode" },
           { key: "nama", header: "Nama" },
@@ -131,30 +126,23 @@ export default function StaffInventoryPage() {
         data={filtered}
       />
 
-      {/* Add Product Modal */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Tambah Produk">
-        <div className="space-y-4">
-          <Input label="Kode Produk *" value={form.kode_produk} onChange={(e) => setForm({ ...form, kode_produk: e.target.value })} />
-          <Input label="Nama *" value={form.nama} onChange={(e) => setForm({ ...form, nama: e.target.value })} />
-          <Input label="Harga Jual *" type="number" value={form.harga_jual} onChange={(e) => setForm({ ...form, harga_jual: Number(e.target.value) })} />
-          <Input label="Stok Awal" type="number" value={form.stok} onChange={(e) => setForm({ ...form, stok: Number(e.target.value) })} />
-          <Input label="Stok Minimum" type="number" value={form.stok_minimum} onChange={(e) => setForm({ ...form, stok_minimum: Number(e.target.value) })} />
-          <Button className="w-full" onClick={handleAdd}>Simpan</Button>
-        </div>
+        <ProductForm onSubmit={handleAdd} onCancel={() => setShowAdd(false)} />
       </Modal>
 
-      {/* Stock In Modal */}
       <Modal
         open={!!showStock}
         onClose={() => setShowStock(null)}
         title={`Tambah Stok: ${showStock?.nama || ""}`}
       >
-        <div className="space-y-4">
-          <p className="text-sm text-slate-500">Stok Saat Ini: <strong>{showStock?.stok}</strong></p>
-          <Input label="Jumlah Masuk *" type="number" value={stockQty} onChange={(e) => setStockQty(Number(e.target.value))} />
-          <Input label="Catatan" value={stockNote} onChange={(e) => setStockNote(e.target.value)} />
-          <Button className="w-full" onClick={handleStockIn} disabled={stockQty <= 0}>Simpan</Button>
-        </div>
+        {showStock && (
+          <StockMutationForm
+            productName={showStock.nama}
+            currentStock={showStock.stok}
+            onSubmit={handleStockIn}
+            onCancel={() => setShowStock(null)}
+          />
+        )}
       </Modal>
     </div>
   );

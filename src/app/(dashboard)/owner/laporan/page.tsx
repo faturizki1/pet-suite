@@ -2,37 +2,17 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "@/components/ui/page-header";
-import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRupiah, formatDate } from "@/lib/utils/format";
-import {
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Receipt,
-  Download,
-} from "lucide-react";
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
-
-const PIE_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444"];
+import { Download } from "lucide-react";
+import { SummaryCards } from "@/components/modules/laporan/summary-cards";
+import { RevenueChart } from "@/components/modules/laporan/revenue-chart";
+import { PaymentPieChart } from "@/components/modules/laporan/payment-pie-chart";
+import { TopProductsChart } from "@/components/modules/laporan/top-products-chart";
 
 interface SummaryData {
   total_pemasukan: number;
@@ -113,15 +93,8 @@ export default function LaporanPage() {
 
   function exportCSV() {
     const headers = [
-      "No. Invoice",
-      "Customer",
-      "Kasir",
-      "Subtotal",
-      "Diskon",
-      "Total",
-      "Metode Bayar",
-      "Status",
-      "Tanggal",
+      "No. Invoice", "Customer", "Kasir", "Subtotal", "Diskon",
+      "Total", "Metode Bayar", "Status", "Tanggal",
     ];
     const rows = transactions.map((t: TransactionData) => [
       t.noTransaksi,
@@ -134,12 +107,7 @@ export default function LaporanPage() {
       t.status,
       formatDate(t.tglTransaksi),
     ]);
-
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((r: string[]) => r.join(",")),
-    ].join("\n");
-
+    const csvContent = [headers.join(","), ...rows.map((r: string[]) => r.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -153,173 +121,45 @@ export default function LaporanPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Laporan Keuangan"
-        subtitle="Ringkasan pemasukan dan pengeluaran"
-      />
+      <PageHeader title="Laporan Keuangan" subtitle="Ringkasan pemasukan dan pengeluaran" />
 
       <div className="mb-6">
-        <DateRangePicker
-          from={tglDari}
-          to={tglSampai}
-          onChange={(f, t) => {
-            setTglDari(f);
-            setTglSampai(t);
-          }}
-        />
+        <DateRangePicker from={tglDari} to={tglSampai} onChange={(f, t) => { setTglDari(f); setTglSampai(t); }} />
       </div>
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card
-          title="Pemasukan"
-          value={formatRupiah(summary?.total_pemasukan || 0)}
-          icon={TrendingUp}
-          color="bg-emerald-100 text-emerald-600"
-        />
-        <Card
-          title="Pengeluaran"
-          value={formatRupiah(summary?.total_pengeluaran || 0)}
-          icon={TrendingDown}
-          color="bg-red-100 text-red-600"
-        />
-        <Card
-          title="Laba Bersih"
-          value={formatRupiah(summary?.laba_bersih || 0)}
-          icon={DollarSign}
-          color="bg-sky-100 text-sky-600"
-        />
-        <Card
-          title="Transaksi"
-          value={`${summary?.total_transaksi || 0} transaksi`}
-          icon={Receipt}
-          color="bg-violet-100 text-violet-600"
-        />
-      </div>
+      <SummaryCards data={summary} />
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-4 text-sm font-semibold text-slate-900">
-            Pemasukan per Hari
-          </h3>
-          {revenueData.length === 0 ? (
-            <p className="text-sm text-slate-400">Belum ada data</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={revenueData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => formatRupiah(v)} />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="total"
-                  name="Pemasukan"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
+          <h3 className="mb-4 text-sm font-semibold text-slate-900">Pemasukan per Hari</h3>
+          <RevenueChart data={revenueData} />
         </div>
-
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-4 text-sm font-semibold text-slate-900">
-            Metode Pembayaran
-          </h3>
-          {paymentMethods.length === 0 ? (
-            <p className="text-sm text-slate-400">Belum ada data</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={paymentMethods}
-                  dataKey="total"
-                  nameKey="method"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  label={({ method, total }: { method: string; total: number }) =>
-                    `${method} (${formatRupiah(total)})`
-                  }
-                >
-                  {paymentMethods.map((_: PaymentMethodItem, i: number) => (
-                    <Cell
-                      key={i}
-                      fill={PIE_COLORS[i % PIE_COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v: number) => formatRupiah(v)} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
+          <h3 className="mb-4 text-sm font-semibold text-slate-900">Metode Pembayaran</h3>
+          <PaymentPieChart data={paymentMethods} />
         </div>
       </div>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-4 text-sm font-semibold text-slate-900">
-            Top 10 Produk
-          </h3>
-          {topProducts.length === 0 ? (
-            <p className="text-sm text-slate-400">Belum ada data</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={topProducts}
-                layout="vertical"
-                margin={{ left: 100 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis
-                  type="category"
-                  dataKey="nama"
-                  tick={{ fontSize: 10 }}
-                  width={90}
-                />
-                <Tooltip formatter={(v: number) => formatRupiah(v)} />
-                <Legend />
-                <Bar dataKey="total" name="Total Penjualan" fill="#3b82f6" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+          <h3 className="mb-4 text-sm font-semibold text-slate-900">Top 10 Produk</h3>
+          <TopProductsChart data={topProducts} />
         </div>
-
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-4 text-sm font-semibold text-slate-900">
-            Pemasukan per Kategori
-          </h3>
+          <h3 className="mb-4 text-sm font-semibold text-slate-900">Pemasukan per Kategori</h3>
           {summary ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={[
-                  {
-                    kategori: "Produk",
-                    total: Number(summary?.total_pemasukan_produk || 0),
-                  },
-                  {
-                    kategori: "Layanan",
-                    total: Number(summary?.total_pemasukan_layanan || 0),
-                  },
-                ]}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="kategori" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => formatRupiah(v)} />
-                <Legend />
-                <Bar
-                  dataKey="total"
-                  name="Pemasukan"
-                  fill="#8b5cf6"
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="flex items-center justify-center h-[300px]">
+              <div className="grid grid-cols-2 gap-8 text-center">
+                <div>
+                  <p className="text-3xl font-bold text-violet-600">{formatRupiah(summary.total_pemasukan_produk || 0)}</p>
+                  <p className="text-sm text-slate-500">Produk</p>
+                </div>
+                <div>
+                  <p className="text-3xl font-bold text-emerald-600">{formatRupiah(summary.total_pemasukan_layanan || 0)}</p>
+                  <p className="text-sm text-slate-500">Layanan</p>
+                </div>
+              </div>
+            </div>
           ) : (
             <p className="text-sm text-slate-400">Belum ada data</p>
           )}
@@ -327,43 +167,20 @@ export default function LaporanPage() {
       </div>
 
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-slate-900">
-          Detail Transaksi
-        </h3>
+        <h3 className="text-lg font-semibold text-slate-900">Detail Transaksi</h3>
         <Button variant="outline" onClick={exportCSV}>
-          <Download className="mr-2 h-4 w-4" />
-          Export CSV
+          <Download className="mr-2 h-4 w-4" /> Export CSV
         </Button>
       </div>
       <Table<TransactionData>
         columns={[
           { key: "noTransaksi", header: "No. Invoice" },
-          {
-            key: "customer",
-            header: "Customer",
-            render: (t: TransactionData) => t.customer?.namaLengkap || "-",
-          },
-          {
-            key: "kasir",
-            header: "Kasir",
-            render: (t: TransactionData) => t.kasir?.namaLengkap || "-",
-          },
-          {
-            key: "total",
-            header: "Total",
-            render: (t: TransactionData) => formatRupiah(t.total),
-          },
+          { key: "customer", header: "Customer", render: (t) => t.customer?.namaLengkap || "-" },
+          { key: "kasir", header: "Kasir", render: (t) => t.kasir?.namaLengkap || "-" },
+          { key: "total", header: "Total", render: (t) => formatRupiah(t.total) },
           { key: "metodeBayar", header: "Metode" },
-          {
-            key: "status",
-            header: "Status",
-            render: (t: TransactionData) => <Badge status={t.status} />,
-          },
-          {
-            key: "tglTransaksi",
-            header: "Tanggal",
-            render: (t: TransactionData) => formatDate(t.tglTransaksi),
-          },
+          { key: "status", header: "Status", render: (t) => <Badge status={t.status} /> },
+          { key: "tglTransaksi", header: "Tanggal", render: (t) => formatDate(t.tglTransaksi) },
         ]}
         data={transactions}
       />

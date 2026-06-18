@@ -4,6 +4,7 @@ import {
   transactions,
   transactionItems,
   products,
+  services,
   stockMutations,
   dailyCounters,
 } from "@/db/schema";

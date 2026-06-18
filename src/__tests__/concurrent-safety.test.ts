@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { createSessionToken } from "@/lib/auth/session";
 import { hashPassword } from "@/lib/auth/password";
+import { NextRequest } from "next/server";
 
 /**
  * Integration tests for concurrent safety (race condition prevention).
@@ -148,21 +149,24 @@ describe("booking slot counter — concurrent safety (real DB)", () => {
   });
 });
 
-describe("FASE 2 — Booking security: customer_id dari token vs body", () => {
+// ============================================================
+// FASE 2 — Real tests that call the actual POST handler
+// ============================================================
+describe("FASE 2 — Booking security: customer_id dari token vs body (real handler)", () => {
   let slotId: string;
   let customerProfileId: string;
-  let customerToken: string;
   let otherCustomerId: string;
+  let customerToken: string;
 
   beforeAll(async () => {
-    // Create a slot
+    // Create a slot with enough kuota
     const [slot] = await db
       .insert(bookingSlots)
       .values({
         tanggal: "2099-12-30",
         jamMulai: "10:00",
         jamSelesai: "11:00",
-        kuota: 5,
+        kuota: 10,
         terisi: 0,
         isAvailable: true,
       })
@@ -212,55 +216,139 @@ describe("FASE 2 — Booking security: customer_id dari token vs body", () => {
   });
 
   it("should use customer_id from token, not from body, when valid session exists", async () => {
-    // Simulate what the route does: resolve customer_id from token
-    const payload = await createSessionToken({
-      sub: customerProfileId,
-      role: "customer",
-      is_active: true,
+    // Import the actual POST handler
+    const { POST } = await import("@/app/api/booking/route");
+
+    // Build a NextRequest with a valid customer cookie but body says otherCustomerId
+    const url = new URL("http://localhost:3000/api/booking");
+    const req = new NextRequest(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        customer_id: otherCustomerId, // body tries to impersonate other customer
+        nama_hewan: "Milo",
+        spesies: "Kucing",
+        keluhan: "Test token override",
+      }),
     });
-    const decoded = await import("@/lib/auth/session").then(m => m.verifySessionToken(payload));
 
-    // The body says customer_id = otherCustomerId, but token says customerProfileId
-    const bodyCustomerId = otherCustomerId;
+    // Manually set the cookie on the request
+    // NextRequest cookies can be set via the cookie header
+    Object.defineProperty(req, "cookies", {
+      value: {
+        get: (name: string) => {
+          if (name === "vetcare_session") return { value: customerToken };
+          return undefined;
+        },
+        has: () => true,
+        [Symbol.iterator]: function* () {
+          yield { name: "vetcare_session", value: customerToken };
+        },
+      },
+      writable: false,
+    });
 
-    // Resolve: since token is valid and role=customer, use token's sub
-    let resolvedCustomerId: string | null = null;
-    if (decoded) {
-      if (decoded.role === "customer") {
-        resolvedCustomerId = decoded.sub; // from token, NOT body
-      } else {
-        resolvedCustomerId = bodyCustomerId;
-      }
-    }
+    const res = await POST(req);
+    const json = await res.json();
 
-    // Verify: resolvedCustomerId should be customerProfileId, NOT otherCustomerId
-    expect(resolvedCustomerId).toBe(customerProfileId);
-    expect(resolvedCustomerId).not.toBe(otherCustomerId);
+    // Response should be 201 (success)
+    expect(res.status).toBe(201);
+
+    // Verify in database: the stored customer_id should be from token, not body
+    const booking = await db.query.onlineBookings.findFirst({
+      where: eq(onlineBookings.slotId, slotId),
+      orderBy: (b, { desc }) => [desc(b.createdAt)],
+    });
+
+    expect(booking).not.toBeNull();
+    expect(booking!.customerId).toBe(customerProfileId);
+    expect(booking!.customerId).not.toBe(otherCustomerId);
   });
 
   it("should reject guest booking that provides customer_id in body", async () => {
-    // Guest (no token) should NOT be allowed to set customer_id
-    const bodyCustomerId = otherCustomerId;
+    const { POST } = await import("@/app/api/booking/route");
 
-    // Simulate route logic: no token → if body has customer_id, reject
-    let rejected = false;
-    if (bodyCustomerId) {
-      rejected = true;
-    }
+    const url = new URL("http://localhost:3000/api/booking");
+    const req = new NextRequest(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        customer_id: otherCustomerId, // guest tries to set customer_id
+        nama_hewan: "Bobby",
+        spesies: "Anjing",
+        keluhan: "Test guest reject",
+      }),
+    });
 
-    expect(rejected).toBe(true);
+    // No cookie set — guest request
+    Object.defineProperty(req, "cookies", {
+      value: {
+        get: () => undefined,
+        has: () => false,
+        [Symbol.iterator]: function* () {},
+      },
+      writable: false,
+    });
+
+    const res = await POST(req);
+    const json = await res.json();
+
+    // Response should be 403
+    expect(res.status).toBe(403);
+    expect(json.error).toContain("Guest");
+
+    // Verify NO booking was created
+    const bookings = await db
+      .select()
+      .from(onlineBookings)
+      .where(eq(onlineBookings.namaHewan, "Bobby"));
+    expect(bookings.length).toBe(0);
   });
 
   it("should allow guest booking with nama_guest and no_hp_guest (no customer_id)", async () => {
-    // Guest (no token) with no customer_id in body → allowed
-    const bodyCustomerId = undefined;
+    const { POST } = await import("@/app/api/booking/route");
 
-    let rejected = false;
-    if (bodyCustomerId) {
-      rejected = true;
-    }
+    const url = new URL("http://localhost:3000/api/booking");
+    const req = new NextRequest(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        nama_guest: "Budi",
+        no_hp_guest: "08123456789",
+        nama_hewan: "Charlie",
+        spesies: "Kelinci",
+        keluhan: "Test guest allowed",
+      }),
+    });
 
-    expect(rejected).toBe(false);
+    // No cookie set — guest request
+    Object.defineProperty(req, "cookies", {
+      value: {
+        get: () => undefined,
+        has: () => false,
+        [Symbol.iterator]: function* () {},
+      },
+      writable: false,
+    });
+
+    const res = await POST(req);
+    const json = await res.json();
+
+    // Response should be 201
+    expect(res.status).toBe(201);
+
+    // Verify in database: customer_id is NULL, nama_guest and no_hp_guest are set
+    const booking = await db.query.onlineBookings.findFirst({
+      where: eq(onlineBookings.namaHewan, "Charlie"),
+    });
+
+    expect(booking).not.toBeNull();
+    expect(booking!.customerId).toBeNull();
+    expect(booking!.namaGuest).toBe("Budi");
+    expect(booking!.noHpGuest).toBe("08123456789");
   });
 });
 

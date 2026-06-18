@@ -2,30 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { PageHeader } from "@/components/ui/page-header";
-import { Table } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { formatDateTime } from "@/lib/utils/format";
-
-interface Booking {
-  id: string;
-  namaHewan: string;
-  spesies: string;
-  status: string;
-  keluhan: string | null;
-  createdAt: string;
-  slot: { tanggal: string; jamMulai: string; jamSelesai: string; dokter: { id: string; namaLengkap: string } | null };
-  customer: { id: string; namaLengkap: string; noHp: string } | null;
-  namaGuest: string | null;
-  noHpGuest: string | null;
-}
+import { BookingTable, BookingData } from "@/components/modules/booking/booking-table";
 
 export default function StaffBookingPage() {
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<BookingData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Booking | null>(null);
+  const [selected, setSelected] = useState<BookingData | null>(null);
   const [action, setAction] = useState<"dikonfirmasi" | "ditolak" | null>(null);
   const [alasan, setAlasan] = useState("");
 
@@ -58,27 +43,10 @@ export default function StaffBookingPage() {
     <div>
       <PageHeader title="Booking Online" subtitle="Konfirmasi booking dari pelanggan" />
 
-      <Table
-        columns={[
-          { key: "createdAt", header: "Tanggal Booking", render: (b: Booking) => formatDateTime(b.createdAt) },
-          { key: "nama", header: "Nama", render: (b: Booking) => b.customer?.namaLengkap || b.namaGuest || "-" },
-          { key: "namaHewan", header: "Hewan" },
-          { key: "spesies", header: "Spesies" },
-          { key: "slot", header: "Slot", render: (b: Booking) => `${b.slot.tanggal} ${b.slot.jamMulai?.slice(0,5)}` },
-          { key: "status", header: "Status", render: (b: Booking) => <Badge status={b.status} /> },
-          {
-            key: "aksi",
-            header: "Aksi",
-            render: (b: Booking) =>
-              b.status === "menunggu" ? (
-                <div className="flex gap-1">
-                  <Button size="sm" onClick={() => { setSelected(b); setAction("dikonfirmasi"); }}>✅</Button>
-                  <Button size="sm" variant="destructive" onClick={() => { setSelected(b); setAction("ditolak"); }}>❌</Button>
-                </div>
-              ) : null,
-          },
-        ]}
-        data={bookings}
+      <BookingTable
+        bookings={bookings}
+        onConfirm={(b) => { setSelected(b); setAction("dikonfirmasi"); }}
+        onReject={(b) => { setSelected(b); setAction("ditolak"); }}
       />
 
       <Modal

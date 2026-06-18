@@ -1,6 +1,5 @@
 "use client";
 
-import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PrintWrapper } from "@/components/ui/print-wrapper";
 import { formatRupiah } from "@/lib/utils/format";
@@ -25,18 +24,14 @@ interface ReceiptData {
 
 interface ReceiptModalProps {
   data: ReceiptData;
-  onPrint: (data: ReceiptData) => void;
   onClose: () => void;
 }
 
-export function ReceiptContent({ data, onPrint, onClose }: ReceiptModalProps) {
+export function ReceiptContent({ data, onClose }: ReceiptModalProps) {
   return (
     <div className="space-y-4">
-      <PrintWrapper title={`Struk - ${data.noTransaksi}`}>
-        <div
-          className="font-mono text-sm space-y-2"
-          style={{ width: "80mm", padding: "8px" }}
-        >
+      <PrintWrapper title={`Struk - ${data.noTransaksi}`} size="receipt">
+        <div className="font-mono text-sm space-y-2" style={{ width: "80mm", padding: "8px" }}>
           <div className="text-center">
             <h2 className="font-bold text-base">VetCare Klinik Hewan</h2>
           </div>
@@ -106,15 +101,9 @@ export function ReceiptContent({ data, onPrint, onClose }: ReceiptModalProps) {
         </div>
       </PrintWrapper>
 
-      <div className="flex gap-2">
-        <Button variant="outline" className="flex-1" onClick={() => onPrint(data)}>
-          <Printer className="mr-2 h-4 w-4" />
-          Cetak Struk
-        </Button>
-        <Button className="flex-1" onClick={onClose}>
-          Tutup
-        </Button>
-      </div>
+      <Button className="w-full" onClick={onClose}>
+        Tutup
+      </Button>
     </div>
   );
 }

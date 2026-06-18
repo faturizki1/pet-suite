@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { products, services } from "@/db/schema";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
-import { eq, and, like, or } from "drizzle-orm";
+import { eq, and, like, or, SQL } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,13 +39,13 @@ export async function GET(request: NextRequest) {
         or(
           like(products.nama, `%${search}%`),
           like(products.kodeProduk, `%${search}%`)
-        )
+        )!
       );
     }
 
     const serviceConditions = [eq(services.isActive, true)];
     if (search) {
-      serviceConditions.push(like(services.nama, `%${search}%`));
+      serviceConditions.push(like(services.nama, `%${search}%`)!);
     }
 
     const [productList, serviceList] = await Promise.all([

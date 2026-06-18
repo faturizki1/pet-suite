@@ -1,53 +1,90 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useEffect } from "react";
 import { Button } from "./button";
 import { Printer } from "lucide-react";
 
 interface PrintWrapperProps {
   children: React.ReactNode;
   title?: string;
+  size?: "receipt" | "a4";
 }
 
-export function PrintWrapper({ children, title }: PrintWrapperProps) {
+const PRINT_STYLES_ID = "vetcare-print-styles";
+
+function ensurePrintStyles() {
+  if (document.getElementById(PRINT_STYLES_ID)) return;
+
+  const style = document.createElement("style");
+  style.id = PRINT_STYLES_ID;
+  style.textContent = `
+    @media print {
+      body.vetcare-printing * {
+        visibility: hidden;
+      }
+      body.vetcare-printing .vetcare-print-content,
+      body.vetcare-printing .vetcare-print-content * {
+        visibility: visible;
+      }
+      body.vetcare-printing .vetcare-print-content {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+      }
+      body.vetcare-printing .vetcare-no-print {
+        display: none !important;
+      }
+      body.vetcare-printing .vetcare-print-content[data-size="receipt"] {
+        max-width: 80mm;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 12px;
+        padding: 16px;
+      }
+      body.vetcare-printing .vetcare-print-content[data-size="a4"] {
+        max-width: 210mm;
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 12pt;
+        padding: 20mm;
+      }
+      @page {
+        margin: 0;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+export function PrintWrapper({ children, title, size = "receipt" }: PrintWrapperProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
-  function handlePrint() {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
+  useEffect(() => {
+    ensurePrintStyles();
+  }, []);
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${title || "Print"}</title>
-          <style>
-            @media print {
-              body { font-family: monospace; font-size: 12px; margin: 0; padding: 16px; }
-              table { width: 100%; border-collapse: collapse; }
-              th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; }
-              .no-print { display: none !important; }
-            }
-            @page { margin: 0; }
-          </style>
-        </head>
-        <body>
-          ${contentRef.current?.innerHTML || ""}
-          <script>window.print();window.close();</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+  function handlePrint() {
+    document.body.classList.add("vetcare-printing");
+    window.print();
+    setTimeout(() => {
+      document.body.classList.remove("vetcare-printing");
+    }, 1000);
   }
 
   return (
     <div>
-      <div className="no-print mb-4">
+      <div className="vetcare-no-print mb-4">
         <Button variant="outline" onClick={handlePrint}>
           <Printer className="mr-2 h-4 w-4" />
           Print
         </Button>
       </div>
-      <div ref={contentRef}>{children}</div>
+      <div
+        ref={contentRef}
+        className="vetcare-print-content"
+        data-size={size}
+      >
+        {children}
+      </div>
     </div>
   );
 }

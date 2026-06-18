@@ -1,20 +1,20 @@
 import { cn } from "@/lib/utils/cn";
 
-export interface Column<T = Record<string, unknown>> {
+export interface Column<T> {
   key: string;
   header: string;
   render?: (item: T) => React.ReactNode;
   className?: string;
 }
 
-interface TableProps<T = Record<string, unknown>> {
+interface TableProps<T> {
   columns: Column<T>[];
   data: T[];
   onRowClick?: (item: T) => void;
   className?: string;
 }
 
-export function Table<T extends Record<string, unknown>>({
+export function Table<T>({
   columns,
   data,
   onRowClick,
@@ -48,7 +48,7 @@ export function Table<T extends Record<string, unknown>>({
           ) : (
             data.map((item, i) => (
               <tr
-                key={(item.id as string) || i}
+                key={(item as Record<string, unknown>).id as string || i}
                 className={cn(
                   "border-b border-slate-100 transition-colors",
                   onRowClick && "cursor-pointer hover:bg-slate-50"
@@ -57,7 +57,7 @@ export function Table<T extends Record<string, unknown>>({
               >
                 {columns.map((col) => (
                   <td key={col.key} className={cn("px-4 py-3 text-slate-700", col.className)}>
-                    {col.render ? col.render(item) : (item[col.key] as React.ReactNode) || "-"}
+                    {col.render ? col.render(item) : (item as Record<string, unknown>)[col.key] as React.ReactNode || "-"}
                   </td>
                 ))}
               </tr>
