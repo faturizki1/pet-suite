@@ -5,7 +5,7 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'minio.domainanda.com',
+        hostname: process.env.NEXT_PUBLIC_MINIO_HOSTNAME || 'minio.domainanda.com',
         pathname: '/clinic-uploads/**'
       }
     ]
