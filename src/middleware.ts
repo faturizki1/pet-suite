@@ -8,11 +8,42 @@ const ROLE_ROUTES: Record<string, string[]> = {
   "/customer": ["customer"],
 };
 
+// Public API routes that don't require any session cookie check
+const PUBLIC_API_ROUTES = [
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/logout",
+  "/api/booking/list",
+  "/api/booking",
+  "/api/booking/slots",
+];
+
+function isPublicApiRoute(pathname: string): boolean {
+  return PUBLIC_API_ROUTES.some((route) => pathname === route || pathname.startsWith(route + "/"));
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip API routes — auth handled in each route
+  // ============================================================
+  // API routes — defense-in-depth: check cookie existence
+  // ============================================================
   if (pathname.startsWith("/api/")) {
+    // Skip public API routes (auth handled in each route)
+    if (isPublicApiRoute(pathname)) {
+      return NextResponse.next();
+    }
+
+    // Defense-in-depth: check that session cookie exists
+    // (actual JWT verification is done in each route handler)
+    const token = request.cookies.get(SESSION_COOKIE)?.value;
+    if (!token) {
+      return NextResponse.json(
+        { error: "Tidak terautentikasi" },
+        { status: 401 }
+      );
+    }
+
     return NextResponse.next();
   }
 
