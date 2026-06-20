@@ -1,14 +1,16 @@
 name: Deploy to Railway
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
     branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Only deploy if CI would pass — but we use required status checks in branch protection
-    # instead of re-running CI here, to avoid duplicate work
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - uses: actions/checkout@v4
