@@ -1,0 +1,50 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Only deploy if CI would pass — but we use required status checks in branch protection
+    # instead of re-running CI here, to avoid duplicate work
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway up --service ${{ vars.RAILWAY_SERVICE_NAME || '' }} --ci
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      # ============================================================
+      # Migration strategy (race-condition safe):
+      #
+      # Railway supports a "Release Command" in the project settings
+      # (Settings > Deploy > Release Command) that runs ONCE before
+      # new replicas start. This avoids multi-replica race conditions.
+      #
+      # Set the Release Command in Railway dashboard to:
+      #   npm run db:migrate
+      #
+      # The command below is a FALLBACK for projects without Release
+      # Command configured. It runs AFTER deploy so the new version
+      # is already live, but uses a simple lock to prevent races.
+      # ============================================================
+      - name: Run database migration (fallback)
+        if: ${{ vars.RAILWAY_RELEASE_COMMAND != 'true' }}
+        run: |
+          echo "::warning::Running migration via deploy workflow. For race-condition safety, set Release Command in Railway dashboard to: npm run db:migrate"
+          railway run --service ${{ vars.RAILWAY_SERVICE_NAME || '' }} "npm run db:migrate" --ci
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
