@@ -39,7 +39,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    const MIME_TO_EXT: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    };
+    const allowedTypes = Object.keys(MIME_TO_EXT);
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
         { error: "Tipe file tidak diizinkan. Hanya jpg, png, webp" },
@@ -57,7 +62,8 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const ext = file.name.split(".").pop() || "jpg";
+    // Derive extension from validated MIME type, NOT from user-controlled file.name
+    const ext = MIME_TO_EXT[file.type] || "jpg";
     const timestamp = Date.now();
     const path = `${folder}/${timestamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
