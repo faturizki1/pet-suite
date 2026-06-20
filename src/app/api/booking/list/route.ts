@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { bookingSlots } from "@/db/schema";
-import { eq, gte } from "drizzle-orm";
+import { eq, gte, and } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,7 +24,10 @@ export async function GET(request: NextRequest) {
       conditions.push(gte(bookingSlots.tanggal, today));
     }
 
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
     const result = await db.query.bookingSlots.findMany({
+      where,
       with: {
         dokter: {
           columns: { id: true, namaLengkap: true },
